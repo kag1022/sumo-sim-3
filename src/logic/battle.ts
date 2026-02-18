@@ -1,5 +1,6 @@
 import { RikishiStatus, Division } from './models';
 import { ENEMY_POOL, EnemyStats } from './enemy_data';
+import { CONSTANTS } from './constants';
 
 export { type EnemyStats };
 
@@ -10,20 +11,39 @@ export { type EnemyStats };
  * @returns boolean 勝利ならtrue
  */
 export const calculateBattleResult = (rikishi: RikishiStatus, enemy: EnemyStats): { isWin: boolean, kimarite: string } => {
-  // 1. 基礎能力の総合値を計算（8軸の平均など）
+  // 1. 基礎能力の総合値を計算
   const myTotal = Object.values(rikishi.stats).reduce((a, b) => a + b, 0);
   const myAverage = myTotal / 8;
   
   // 2. 調子補正
-  const conditionMod = 1.0 + ((rikishi.currentCondition - 50) / 200); // 0.75 ~ 1.25
+  const conditionMod = 1.0 + ((rikishi.currentCondition - 50) / 200); 
   
-  // 3. 戦闘力比較
-  // 自分の戦闘力
-  const myPower = myAverage * conditionMod;
+  // 3. 戦闘力基本値
+  let myPower = myAverage * conditionMod;
+
+  // NEW: 得意技ボーナス
+  let usedSignatureMove: string | null = null;
   
-  // 4. 勝率計算 (ロジスティック曲線的アプローチ)
-  // 力の差が 0 なら 50%
-  // 力の差が +20 なら 80% くらい勝たせたい
+  if (rikishi.signatureMoves && rikishi.signatureMoves.length > 0) {
+      // 最初の得意技を使用試行
+      const moveName = rikishi.signatureMoves[0];
+      const moveData = CONSTANTS.SIGNATURE_MOVE_DATA[moveName];
+      if (moveData) {
+          // 関連ステータス平均
+          const relatedTotal = moveData.relatedStats.reduce((sum, stat) => sum + (rikishi.stats[stat as keyof typeof rikishi.stats] || 0), 0);
+          const relatedAvg = relatedTotal / moveData.relatedStats.length;
+          
+          // 関連ステータスが平均以上ならボーナス適用
+          if (relatedAvg >= myAverage * 0.9) {
+             // ボーナス: winRateBonus * 20 (例: 0.5 * 20 = +10 Power)
+             const signatureBonus = moveData.winRateBonus * 20;
+             myPower += signatureBonus;
+             usedSignatureMove = moveName;
+          }
+      }
+  }
+  
+  // 4. 勝率計算
   const powerDiff = myPower - enemy.power;
   const winProbability = 1 / (1 + Math.exp(-0.05 * powerDiff));
   
@@ -34,14 +54,18 @@ export const calculateBattleResult = (rikishi: RikishiStatus, enemy: EnemyStats)
   // 6. 決まり手の決定
   let kimarite = '寄り切り';
   if (isWin) {
-    // 自分のステータス傾向から決まり手を選択
-    const stats = rikishi.stats;
-    if (stats.tsuki + stats.oshi > stats.kumi + stats.nage) {
-        kimarite = Math.random() > 0.5 ? '押し出し' : '突き出し';
-    } else if (stats.nage > stats.kumi) {
-        kimarite = Math.random() > 0.5 ? '上手投げ' : '掬い投げ';
+    // 得意技で勝った場合、高確率でその決まり手になる
+    if (usedSignatureMove && Math.random() < 0.7) {
+        kimarite = usedSignatureMove;
     } else {
-        kimarite = Math.random() > 0.5 ? '寄り切り' : '寄り倒し';
+        const stats = rikishi.stats;
+        if (stats.tsuki + stats.oshi > stats.kumi + stats.nage) {
+            kimarite = Math.random() > 0.5 ? '押し出し' : '突き出し';
+        } else if (stats.nage > stats.kumi) {
+            kimarite = Math.random() > 0.5 ? '上手投げ' : '掬い投げ';
+        } else {
+            kimarite = Math.random() > 0.5 ? '寄り切り' : '寄り倒し';
+        }
     }
   } else {
     // 負け決まり手

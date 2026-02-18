@@ -1,5 +1,6 @@
 import React from 'react';
 import { RikishiStatus, Rank } from '../../logic/models'; // Rank added
+import { getRankValueForChart } from '../../logic/ranking';
 import { Card, CardContent, CardHeader, CardTitle } from '../common/Card';
 import { Button } from '../common/Button';
 import { ArrowLeft, Trophy, Activity, TrendingUp } from 'lucide-react'; // TrendingUp fixed
@@ -9,24 +10,6 @@ interface ReportScreenProps {
   status: RikishiStatus;
   onReset: () => void;
 }
-
-// ヘルパー: グラフ用ランク値計算
-// ヘルパー: グラフ用ランク値計算（表示用スケール）
-const getRankValueForChart = (rank: Rank): number => {
-    if (rank.division === 'Makuuchi') {
-        if (rank.name === '横綱') return 0;
-        if (rank.name === '大関') return 10;
-        if (rank.name === '関脇') return 20;
-        if (rank.name === '小結') return 30;
-        return 40 + (rank.number || 1); // M1=41, M17=57
-    }
-    if (rank.division === 'Juryo') return 60 + (rank.number || 1); // J1=61, J14=74
-    if (rank.division === 'Makushita') return 80 + (rank.number || 1); // Ms1=81, Ms60=141
-    if (rank.division === 'Sandanme') return 150 + (rank.number || 1); // Sd1=151
-    if (rank.division === 'Jonidan') return 260 + (rank.number || 1); // Jd1=261
-    if (rank.division === 'Jonokuchi') return 470 + (rank.number || 1); // Jk1=471
-    return 600; // Maezumo
-};
 
 // ヘルパー: イベント色
 const getEventColor = (type: string) => {
@@ -42,9 +25,23 @@ const getEventColor = (type: string) => {
 };
 
 // ヘルパー: ランク名フォーマット（筆頭対応）
-const formatRankName = (rank: Rank) => {
+const formatRankName = (rank: Rank, simple: boolean = false) => {
     const isSpecial = ['横綱', '大関', '関脇', '小結', '前相撲'].includes(rank.name);
     if (isSpecial) return rank.name;
+
+    // 幕下以下 (人数＝枚数ではなく、東西で割る)
+    if (['Makushita', 'Sandanme', 'Jonidan', 'Jonokuchi'].includes(rank.division)) {
+        const val = rank.number || 1;
+        const effectiveRank = Math.ceil(val / 2);
+        
+        if (simple) {
+             return `${rank.name}${effectiveRank === 1 ? '筆頭' : effectiveRank + '枚目'}`;
+        }
+        
+        const side = (val % 2 === 1) ? '東' : '西';
+        return `${side}${rank.name}${effectiveRank === 1 ? '筆頭' : effectiveRank + '枚目'}`;
+    }
+
     if (rank.number === 1) return `${rank.name}筆頭`;
     return `${rank.name}${rank.number || ''}枚目`;
 };
@@ -117,7 +114,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({ status, onReset }) =
             <div>
               <span className="block text-xs uppercase tracking-wider">最高位</span>
               <span className="text-2xl font-bold text-white">
-                {formatRankName(maxRank)}
+                {formatRankName(maxRank, true)}
               </span>
             </div>
             <div className="text-left">
@@ -202,7 +199,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({ status, onReset }) =
                 />
                 <Tooltip 
                     labelFormatter={(label) => `${label}`}
-                    formatter={(_val: any, _name: any, props: any) => [props.payload.rankLabel, '番付']}
+                    formatter={(_val: number, _name: string, props: {payload?: {rankLabel: string}}) => [props.payload?.rankLabel || '', '番付']}
                 />
                 <Line type="monotone" dataKey="rankVal" stroke="#82ca9d" strokeWidth={2} dot={false} />
               </LineChart>
@@ -247,6 +244,53 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({ status, onReset }) =
               </tbody>
             </table>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* 怪我ステータス */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center text-red-600">
+             <Activity className="w-5 h-5 mr-2"/>
+             引退時の身体状態 (古傷・最終的な怪我)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {(status.injuries && status.injuries.length > 0) ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {status.injuries.map(injury => {
+                      let bgColor = 'bg-red-50 border-red-200';
+                      let badgeColor = 'bg-red-100 text-red-700';
+                      let statusText = '治療中';
+                      
+                      if (injury.status === 'CHRONIC') {
+                          bgColor = 'bg-amber-50 border-amber-200';
+                          badgeColor = 'bg-amber-100 text-amber-700';
+                          statusText = '慢性';
+                      } else if (injury.status === 'HEALED') {
+                          bgColor = 'bg-slate-50 border-slate-200';
+                          badgeColor = 'bg-slate-100 text-slate-500';
+                          statusText = '完治';
+                      }
+
+                      return (
+                      <div key={injury.id} className={`p-3 rounded border ${bgColor}`}>
+                          <div className="flex justify-between items-center mb-1">
+                              <span className={`font-bold ${injury.status === 'HEALED' ? 'text-slate-500' : 'text-slate-800'}`}>{injury.name}</span>
+                              <span className={`text-xs px-2 py-0.5 rounded ${badgeColor}`}>
+                                  {statusText}
+                              </span>
+                          </div>
+                          <div className="text-sm text-slate-600">
+                              {injury.status === 'HEALED' ? '回復済み' : `重症度: ${injury.severity} / 10`}
+                          </div>
+                      </div>
+                      );
+                  })}
+              </div>
+          ) : (
+              <p className="text-slate-500 py-4 text-center">引退時、深刻な怪我や古傷はありませんでした。</p>
+          )}
         </CardContent>
       </Card>
 

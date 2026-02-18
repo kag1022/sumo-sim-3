@@ -1,5 +1,5 @@
 // State update if needed, but simple obj spread is fine
-import { RikishiStatus, Rank, BashoRecord, Oyakata } from './models';
+import { RikishiStatus, Rank, BashoRecord, Oyakata, Injury, InjuryType } from './models';
 import { CONSTANTS } from './constants';
 import { calculateBattleResult, generateEnemy } from './battle';
 import { calculateNextRank, getRankValue } from './ranking';
@@ -11,11 +11,12 @@ export interface SimulationParams {
     oyakata: Oyakata | null;
 }
 
-export const runSimulation = (params: SimulationParams): RikishiStatus => {
-    let status: RikishiStatus = { 
-        ...params.initialStats,
-        statHistory: [] 
-    };
+export const runSimulation = async (params: SimulationParams): Promise<RikishiStatus> => {
+    // Deep copy to avoid reference sharing for nested objects like history
+    let status: RikishiStatus = JSON.parse(JSON.stringify(params.initialStats));
+    status.statHistory = [];
+    if (!status.injuries) status.injuries = []; // Init injuries array
+    
     let year = new Date().getFullYear(); // 開始年
     
     // 入門イベント
@@ -117,6 +118,9 @@ export const runSimulation = (params: SimulationParams): RikishiStatus => {
 
         status.age += 1;
         year += 1;
+        
+        // Yield to allow UI updates
+        await new Promise(resolve => setTimeout(resolve, 0));
     }
 };
 
@@ -143,12 +147,30 @@ const runBasho = (status: RikishiStatus, year: number, month: number): BashoReco
     // 取組ループ
     for (let day = 1; day <= numBouts; day++) {
         // 場所中の怪我発生判定（不戦敗）
-        // 0.5% の確率で怪我によりその日の取組から休場（その日は不戦敗＝Loss扱い）
-        if (Math.random() < 0.005) {
+        if (Math.random() < CONSTANTS.PROBABILITY.INJURY_PER_BOUT) {
             losses++; // その日は不戦敗
             const remaining = numBouts - day; // 残り日程
             absent += remaining;
-            // ログ用にkimariteなどを保存できないが、BashoRecordには詳細なし
+            
+            // 怪我生成
+            const newInjury = generateInjury(status, year, month);
+            if (!status.injuries) status.injuries = [];
+
+            // 同じ箇所の怪我が治っていないかチェック
+            const existingIndex = status.injuries.findIndex(i => i.type === newInjury.type && i.status !== 'HEALED');
+            
+            if (existingIndex >= 0) {
+                // 既存の怪我を悪化させる（再発）
+                const existing = status.injuries[existingIndex];
+                existing.severity = Math.min(10, existing.severity + newInjury.severity);
+                existing.status = 'ACUTE'; // 急性期に戻る
+            } else {
+                status.injuries.push(newInjury);
+            }
+
+            // 従来のinjuryLevelも一応更新（互換性）
+            status.injuryLevel += newInjury.severity; 
+
             break;
         }
 
@@ -166,17 +188,16 @@ const runBasho = (status: RikishiStatus, year: number, month: number): BashoReco
     }
 
     // 優勝判定（簡易：全勝 or 1敗かつ上位）
-    // 実際は他力士との比較が必要だが、ここでは「好成績なら優勝」とする確率モデル
     let yusho = false;
     // 幕内: 13勝以上でチャンス
     if (status.rank.division === 'Makuuchi') {
         if (wins === 15) yusho = true;
-        else if (wins === 14 && Math.random() < 0.8) yusho = true;
-        else if (wins === 13 && Math.random() < 0.3) yusho = true;
+        else if (wins === 14 && Math.random() < CONSTANTS.PROBABILITY.YUSHO.MAKUUCHI_14) yusho = true;
+        else if (wins === 13 && Math.random() < CONSTANTS.PROBABILITY.YUSHO.MAKUUCHI_13) yusho = true;
     } else {
         // 十両以下: 全勝ならほぼ優勝
-        if (numBouts === 15 && wins >= 14) yusho = Math.random() < 0.9;
-        if (numBouts === 7 && wins === 7) yusho = Math.random() < 0.9;
+        if (numBouts === 15 && wins >= 14) yusho = Math.random() < CONSTANTS.PROBABILITY.YUSHO.JURYO_14;
+        if (numBouts === 7 && wins === 7) yusho = Math.random() < CONSTANTS.PROBABILITY.YUSHO.LOWER_7;
     }
 
     return {
@@ -230,4 +251,34 @@ const finalizeCareer = (status: RikishiStatus, year: number, month: number, reas
     status.history.title = generateTitle(status.history);
 
     return status;
+};
+
+const generateInjury = (_status: RikishiStatus, year: number, month: number): Injury => {
+    // Generate type based on weighted probability
+    const types = Object.keys(CONSTANTS.INJURY_DATA) as InjuryType[];
+    let totalWeight = 0;
+    types.forEach(t => totalWeight += CONSTANTS.INJURY_DATA[t].weight);
+    
+    let r = Math.random() * totalWeight;
+    let selectedType: InjuryType = types[0];
+    for(const t of types) {
+        r -= CONSTANTS.INJURY_DATA[t].weight;
+        if(r <= 0) {
+            selectedType = t;
+            break;
+        }
+    }
+    
+    const data = CONSTANTS.INJURY_DATA[selectedType];
+    // Random severity within range
+    const severity = Math.floor(Math.random() * (data.severityMax - data.severityMin + 1)) + data.severityMin;
+    
+    return {
+        id: crypto.randomUUID(),
+        type: selectedType,
+        name: data.name,
+        severity,
+        status: 'ACUTE',
+        occurredAt: { year, month }
+    };
 };

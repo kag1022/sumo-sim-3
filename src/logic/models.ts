@@ -1,8 +1,31 @@
+// 力士の素質タイプ (アーキタイプ)
+export type TalentArchetype = 'MONSTER' | 'GENIUS' | 'HARD_WORKER' | 'AVG_JOE' | 
+                              'UNIVERSITY_YOKOZUNA' | 'HIGH_SCHOOL_CHAMP' | 'STREET_FIGHTER';
+
+// 入門区分
+export type EntryDivision = 'Maezumo' | 'Makushita10' | 'Makushita15';
+
 // 力士の成長タイプ
 export type GrowthType = 'EARLY' | 'NORMAL' | 'LATE' | 'GENIUS';
 
 // 戦術タイプ
 export type TacticsType = 'PUSH' | 'GRAPPLE' | 'TECHNIQUE' | 'BALANCE';
+
+// 怪我の種類
+export type InjuryType = 'KNEE' | 'SHOULDER' | 'ELBOW' | 'BACK' | 'ANKLE' | 'NECK';
+
+// 怪我の状態
+export type InjuryStatusType = 'ACUTE' | 'SUBACUTE' | 'CHRONIC' | 'HEALED';
+
+// 怪我データ
+export interface Injury {
+  id: string;
+  type: InjuryType;
+  name: string;      // 表示名（例: 右膝半月板損傷）
+  severity: number;  // 重症度 (1-10)
+  status: InjuryStatusType;
+  occurredAt: { year: number; month: number };
+}
 
 // 力士の現在の状態（動的に変化）
 export interface RikishiStatus {
@@ -26,10 +49,14 @@ export interface RikishiStatus {
   // 内部パラメータ
   potential: number;     // 潜在能力（成長限界に影響）
   growthType: GrowthType;
-  tactics: TacticsType;  // 戦術タイプ (NEW)
-  durability: number;    // 基礎耐久力
+  tactics: TacticsType;    // 戦術タイプ
+  archetype?: TalentArchetype; // 素質タイプ (NEW)
+  entryDivision?: EntryDivision; // 入門区分 (NEW)
+  signatureMoves: string[];    // 得意技リスト (NEW)
+  durability: number;      // 基礎耐久力
   currentCondition: number; // 現在の調子 (0-100)
-  injuryLevel: number;   // 怪我レベル (0:なし, >0:休場期間)
+  injuryLevel: number;   // 【非推奨】怪我レベル (0:なし, >0:休場期間) - 後方互換性のため残す
+  injuries: Injury[];    // 詳細な怪我リスト
   isOzekiKadoban?: boolean; // 大関カド番
 
   history: CareerHistory;
